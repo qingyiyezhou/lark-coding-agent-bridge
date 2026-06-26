@@ -46,6 +46,13 @@ export interface PreFlightOptions {
   bridgeConfig?: AppConfig;
   profileConfig?: ProfileConfig;
   appPaths?: AppPaths;
+  /**
+   * Pre-resolved plaintext App Secret. On Windows, passed through to
+   * writeLarkCliSourceProjection so the projection file uses an inline secret
+   * instead of an exec provider (which always fails the world-writable audit
+   * because Node's stat().mode returns 0666 on Windows regardless of ACLs).
+   */
+  resolvedAppSecret?: string;
 }
 
 export async function preFlightChecks(opts: PreFlightOptions): Promise<void> {
@@ -58,7 +65,9 @@ async function checkLarkCli(opts: PreFlightOptions): Promise<void> {
   const appPaths = opts.appPaths;
   const privateBinding = bridgeConfig !== undefined && appPaths !== undefined && opts.larkChannel !== undefined;
   if (privateBinding) {
-    await writeLarkCliSourceProjection(bridgeConfig, appPaths);
+    await writeLarkCliSourceProjection(bridgeConfig, appPaths, {
+      resolvedAppSecret: opts.resolvedAppSecret,
+    });
   }
   const larkChannelEnv = opts.larkChannel ? buildLarkChannelEnv(opts.larkChannel) : undefined;
   const legacyLarkChannelEnv = opts.larkChannel

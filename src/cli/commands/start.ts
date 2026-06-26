@@ -22,6 +22,7 @@ import { isComplete } from '../../config/schema';
 import { configureLogger, gcOldLogs, log, reportError } from '../../core/logger';
 import { loadTelemetryAdapter, telemetry } from '../../core/telemetry';
 import { gcMediaCache } from '../../media/cache';
+import { resolveAppSecret } from '../../config/secret-resolver';
 import { preFlightChecks } from '../preflight';
 import { promptAndStopActiveBridgeMigrationConflict } from './migrate';
 import { stopProcessEntry, type StopProcessEntryResult } from './ps';
@@ -111,6 +112,9 @@ export async function runStart(opts: StartOptions): Promise<void> {
       larkCliConfigDir: appPaths.larkCliConfigDir,
       larkCliSourceConfigFile: appPaths.larkCliSourceConfigFile,
     },
+    resolvedAppSecret: process.platform === 'win32'
+      ? await resolveAppSecret(cfg, appPaths).catch(() => undefined)
+      : undefined,
   });
 
   await loadTelemetryAdapter({

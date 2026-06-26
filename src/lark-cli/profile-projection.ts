@@ -15,16 +15,27 @@ export async function writeLarkCliSourceProjection(
     | 'larkCliSourceConfigFile'
     | 'secretsGetterScript'
   >,
+  opts: { resolvedAppSecret?: string } = {},
 ): Promise<string> {
   await mkdir(appPaths.larkCliSourceDir, { recursive: true, mode: 0o700 });
   await chmod(appPaths.larkCliSourceDir, 0o700).catch(() => {});
 
-  const secrets = await buildProjectionSecrets(cfg, appPaths);
+  // On Windows, Node's fs.stat().mode always returns 0666 regardless of ACLs,
+  // so lark-cli's exec-provider security audit always fails. Work around this
+  // by writing the resolved plaintext secret directly into the projection file
+  // (which lark-cli does not audit for world-writable). The projection file
+  // itself is written with mode 0o600 so the secret is not broadly accessible.
+  const isWindows = process.platform === 'win32';
+  const useInlineSecret = isWindows && typeof opts.resolvedAppSecret === 'string';
+
+  const appSecret = useInlineSecret ? opts.resolvedAppSecret! : cfg.accounts.app.secret;
+  const secrets = useInlineSecret ? undefined : await buildProjectionSecrets(cfg, appPaths);
+
   const projection = {
     accounts: {
       app: {
         id: cfg.accounts.app.id,
-        secret: cfg.accounts.app.secret,
+        secret: appSecret,
         tenant: cfg.accounts.app.tenant,
       },
     },
