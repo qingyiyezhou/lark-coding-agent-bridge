@@ -3,6 +3,9 @@ import type { ToolEntry } from './run-state';
 const HEADER_SUMMARY_MAX = 80;
 const BODY_FIELD_MAX = 600;
 const OUTPUT_MAX = 1200;
+// Sub-agent tools (Skill, Agent, Task) can return large outputs — give them more room.
+const SUBAGENT_OUTPUT_MAX = 4000;
+const SUB_AGENT_TOOLS = new Set(['Skill', 'Agent', 'Task']);
 /**
  * Cumulative cap on a tool's full body markdown (input + output + code fences
  * + headers). Even with per-field caps, pathological tools (many input
@@ -23,8 +26,11 @@ export function toolBodyMd(tool: ToolEntry): string {
   const inputMd = renderInput(tool);
   if (inputMd) parts.push(inputMd);
 
-  if (tool.output) {
-    const truncated = truncate(tool.output, OUTPUT_MAX);
+  if (tool.outputSurfaced) {
+    parts.push('_输出已显示在下方_');
+  } else if (tool.output) {
+    const limit = SUB_AGENT_TOOLS.has(tool.name) ? SUBAGENT_OUTPUT_MAX : OUTPUT_MAX;
+    const truncated = truncate(tool.output, limit);
     if (tool.status === 'error') {
       parts.push(`**Error**\n\`\`\`\n${truncated}\n\`\`\``);
     } else if (tool.name === 'Bash') {
@@ -69,6 +75,8 @@ function summarizeInput(name: string, input: unknown): string {
       return pick('url');
     case 'WebSearch':
       return pick('query', 60);
+    case 'Skill':
+      return pick('skill') || pick('name') || pick('description');
     case 'Agent':
     case 'Task':
       return pick('description') || pick('subagent_type');
@@ -105,6 +113,12 @@ function renderInput(tool: ToolEntry): string {
       return str('url') ? `**URL** ${str('url')}` : '';
     case 'WebSearch':
       return str('query') ? `**Query** \`${truncate(str('query'), BODY_FIELD_MAX)}\`` : '';
+    case 'Skill':
+    case 'Agent':
+    case 'Task': {
+      const desc = str('description') || str('skill') || str('name') || str('subagent_type');
+      return desc ? `**Task** ${truncate(desc, BODY_FIELD_MAX)}` : '';
+    }
     default:
       return '';
   }

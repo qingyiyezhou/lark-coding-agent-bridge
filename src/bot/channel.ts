@@ -771,9 +771,17 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
 
   // Re-read prefs on every flush so toggling /config mid-stream takes
   // effect immediately. Cheap object lookups, no allocation when on.
+  // Sub-agent tools (Skill, Agent, Task) produce content that IS the answer —
+  // always show them regardless of the showToolCalls preference.
+  const SUB_AGENT_TOOLS = new Set(['Skill', 'Agent', 'Task']);
   const filterForPrefs = (state: RunState): RunState => {
     if (getShowToolCalls(controls.cfg)) return state;
-    return { ...state, blocks: state.blocks.filter((b) => b.kind !== 'tool') };
+    return {
+      ...state,
+      blocks: state.blocks.filter(
+        (b) => b.kind !== 'tool' || SUB_AGENT_TOOLS.has(b.tool.name),
+      ),
+    };
   };
   const cardRenderOptions = callbackAuth
     ? {

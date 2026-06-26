@@ -8,6 +8,9 @@ export interface ToolEntry {
   input: unknown;
   status: ToolStatus;
   output?: string;
+  /** True when the tool output has been surfaced as a standalone text block
+   * (e.g. Task / Agent sub-agent results) so the panel body skips re-rendering it. */
+  outputSurfaced?: boolean;
 }
 
 export type Block =
@@ -86,18 +89,40 @@ export function reduce(state: RunState, evt: AgentEvent): RunState {
     }
 
     case 'tool_result': {
+      const isSurfaceable = (name: string): boolean =>
+        name === 'Task' || name === 'Agent' || name === 'Skill';
+
+      let surfaceText: string | undefined;
       const blocks = state.blocks.map((b) => {
         if (b.kind !== 'tool' || b.tool.id !== evt.id) return b;
+        const shouldSurface = !evt.isError && isSurfaceable(b.tool.name) && Boolean(evt.output?.trim());
+        if (shouldSurface) surfaceText = evt.output;
         return {
           ...b,
           tool: {
             ...b.tool,
             status: evt.isError ? ('error' as const) : ('done' as const),
             output: evt.output,
+            outputSurfaced: shouldSurface,
           },
         };
       });
-      return { ...state, blocks };
+
+      // Append sub-agent output as a visible text block right after the tool entry.
+      const finalBlocks: Block[] = [];
+      for (const b of blocks) {
+        finalBlocks.push(b);
+        if (
+          b.kind === 'tool' &&
+          b.tool.id === evt.id &&
+          b.tool.outputSurfaced &&
+          surfaceText
+        ) {
+          finalBlocks.push({ kind: 'text', content: surfaceText, streaming: false });
+        }
+      }
+
+      return { ...state, blocks: finalBlocks };
     }
 
     case 'error': {
