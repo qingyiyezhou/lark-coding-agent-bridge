@@ -23,6 +23,7 @@ import {
   markIdleTimeout,
   markInterrupted,
   reduce,
+  withStartedAt,
   type RunState,
 } from '../card/run-state';
 import { renderText } from '../card/text-renderer';
@@ -857,6 +858,10 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       let latestState: RunState = initialState;
       let producerStarted = false;
       let markdownCtrl: { setContent(markdown: string): Promise<void> } | undefined;
+      // Track whether we ever pushed non-empty content into the stream.
+      // If we haven't by the time the agent finishes, the SDK fills the card
+      // with "(no content)" — we need to push a fallback ack instead.
+      let didSetContent = false;
       const renderDone = processAgentStream(
         handle,
         eventStream,
@@ -866,7 +871,11 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         async (state) => {
           latestState = state;
           if (markdownCtrl) {
-            await markdownCtrl.setContent(renderText(filterForPrefs(state)));
+            const body = renderText(filterForPrefs(state));
+            if (body.trim()) {
+              didSetContent = true;
+              await markdownCtrl.setContent(body);
+            }
           }
         },
       );
@@ -876,8 +885,18 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           markdown: async (ctrl) => {
             producerStarted = true;
             markdownCtrl = ctrl;
-            await ctrl.setContent(renderText(filterForPrefs(latestState)));
+            const initialBody = renderText(filterForPrefs(latestState));
+            if (initialBody.trim()) {
+              didSetContent = true;
+              await ctrl.setContent(initialBody);
+            }
             await renderDone;
+            // If the agent finished without producing any visible text (e.g.
+            // tool-only run with showToolCalls off), push a minimal ack so
+            // the SDK doesn't fill the card with "(no content)".
+            if (!didSetContent) {
+              await ctrl.setContent('✅ 完成');
+            }
           },
         },
         sendOpts,
@@ -891,6 +910,10 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           const body = renderText(filterForPrefs(state));
           if (body.trim()) {
             await channel.send(chatId, { markdown: body }, sendOpts);
+          } else if (state.terminal === 'done') {
+            // Same as text mode: tool-only run with showToolCalls off → send
+            // a minimal ack so the user isn't left with no response.
+            await channel.send(chatId, { markdown: '✅ 完成' }, sendOpts);
           }
         },
       });
@@ -909,6 +932,11 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       const body = renderText(filterForPrefs(finalState));
       if (body.trim()) {
         await channel.send(chatId, { markdown: body }, sendOpts);
+      } else if (finalState.terminal === 'done') {
+        // Agent finished but produced no visible text (e.g. tool-only run with
+        // showToolCalls disabled). Send a minimal ack so the user isn't left
+        // with no response at all.
+        await channel.send(chatId, { markdown: '✅ 完成' }, sendOpts);
       }
     }
   } catch (err) {
@@ -933,7 +961,7 @@ async function processAgentStream(
   flush: (state: RunState) => Promise<void>,
 ): Promise<RunState> {
   const runStart = Date.now();
-  let state: RunState = initialState;
+  let state: RunState = withStartedAt(initialState, runStart);
 
   // Idle watchdog: claude going silent for `idleTimeoutMs` is treated as
   // "presumed hung", we stop() and surface a timeout marker on the card.
@@ -967,6 +995,16 @@ async function processAgentStream(
     }, idleTimeoutMs);
   };
   armOrPauseIdle();
+
+  // Heartbeat: re-flush the card every 5s so the elapsed-time counter in the
+  // footer keeps ticking even when the agent is silent (e.g. during a long
+  // tool call or extended thinking phase). Without this the card looks frozen
+  // and users can't tell whether the agent is alive or stuck.
+  const HEARTBEAT_MS = 5_000;
+  let heartbeatTimer: NodeJS.Timeout | undefined = setInterval(() => {
+    if (state.terminal !== 'running') return;
+    void flush(state).catch((err) => log.warn('heartbeat', 'flush-error', { err: String(err) }));
+  }, HEARTBEAT_MS);
 
   try {
     for await (const evt of events) {
@@ -1020,6 +1058,10 @@ async function processAgentStream(
     }
   } finally {
     if (timer) clearTimeout(timer);
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = undefined;
+    }
   }
 
   // If state already reached a terminal event (done/error/etc.) before the

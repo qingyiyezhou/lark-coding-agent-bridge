@@ -27,7 +27,7 @@ export function renderText(state: RunState): string {
   } else if (state.terminal === 'error' && state.errorMsg) {
     parts.push(`⚠️ agent 失败:${state.errorMsg}`);
   } else if (state.terminal === 'running' && state.footer) {
-    parts.push(footerLine(state.footer));
+    parts.push(footerLine(state.footer, state.startedAtMs));
   }
 
   return parts.join('\n\n');
@@ -50,8 +50,9 @@ function toolLine(tool: ToolEntry): string {
   return `> ${toolHeaderText(tool)}`;
 }
 
-function footerLine(status: 'thinking' | 'tool_running' | 'streaming'): string {
-  if (status === 'thinking') return '_🧠 正在思考…_';
-  if (status === 'tool_running') return '_🧰 正在调用工具…_';
-  return '_✍️ 正在输出…_';
+function footerLine(status: 'thinking' | 'tool_running' | 'streaming', startedAtMs: number): string {
+  const elapsed = startedAtMs > 0 ? ` (${Math.round((Date.now() - startedAtMs) / 1000)}s)` : '';
+  if (status === 'thinking') return `_🧠 正在思考…${elapsed}_`;
+  if (status === 'tool_running') return `_🧰 正在调用工具…${elapsed}_`;
+  return `_✍️ 正在输出…${elapsed}_`;
 }

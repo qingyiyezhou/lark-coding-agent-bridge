@@ -47,7 +47,7 @@ export function renderCard(state: RunState, options: RunCardRenderOptions = {}):
   }
 
   if (state.terminal === 'running') {
-    if (state.footer) elements.push(footerStatus(state.footer));
+    if (state.footer) elements.push(footerStatus(state.footer, state.startedAtMs));
     elements.push(stopButton(options));
   }
 
@@ -191,14 +191,15 @@ function stopButton(options: RunCardRenderOptions): object {
   };
 }
 
-function footerStatus(status: Exclude<FooterStatus, null>): object {
-  const text =
+function footerStatus(status: Exclude<FooterStatus, null>, startedAtMs: number): object {
+  const base =
     status === 'thinking'
       ? '🧠 正在思考'
       : status === 'tool_running'
         ? '🧰 正在调用工具'
         : '✍️ 正在输出';
-  return noteMd(text);
+  const elapsed = startedAtMs > 0 ? ` (${Math.round((Date.now() - startedAtMs) / 1000)}s)` : '';
+  return noteMd(`${base}${elapsed}`);
 }
 
 function summaryText(state: RunState): string {

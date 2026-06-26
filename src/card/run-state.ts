@@ -29,6 +29,10 @@ export interface RunState {
   /** Set when terminal === 'idle_timeout' — how long claude was idle before
    * the watchdog gave up (so the message can say "N 分钟无响应"). */
   idleTimeoutMinutes?: number;
+  /** Unix ms when the run started — used by renderers to show elapsed time in
+   * the footer so users can tell the agent is alive during long silent phases.
+   * 0 means "not yet set" (skeleton / pre-run state); renderers skip elapsed. */
+  startedAtMs: number;
 }
 
 export const initialState: RunState = {
@@ -36,6 +40,7 @@ export const initialState: RunState = {
   reasoning: { content: '', active: false },
   footer: 'thinking',
   terminal: 'running',
+  startedAtMs: 0,
 };
 
 function closeStreamingText(blocks: Block[]): Block[] {
@@ -159,6 +164,10 @@ export function reduce(state: RunState, evt: AgentEvent): RunState {
     default:
       return state;
   }
+}
+
+export function withStartedAt(state: RunState, startedAtMs: number): RunState {
+  return { ...state, startedAtMs };
 }
 
 export function markInterrupted(state: RunState): RunState {
